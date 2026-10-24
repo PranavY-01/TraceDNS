@@ -1,0 +1,200 @@
+{
+  "schema_version": "1.0",
+  "tool": {
+    "name": "TraceDNS",
+    "version": "1.0.0"
+  },
+  "target": {
+    "domain": "example.com"
+  },
+  "scan": {
+    "started_at": "2026-10-24T13:33:27.417497+00:00",
+    "finished_at": "2026-10-24T13:33:27.418497+00:00",
+    "duration_seconds": 0.0,
+    "status": "completed",
+    "record_types": [
+      "A",
+      "AAAA",
+      "MX",
+      "NS",
+      "TXT"
+    ],
+    "checks": [
+      "spf",
+      "dmarc",
+      "dkim"
+    ],
+    "dkim_selector": "s1",
+    "timeout_seconds": 5.0
+  },
+  "dns_results": [
+    {
+      "query_name": "example.com",
+      "record_type": "A",
+      "status": "success",
+      "records": [
+        "192.0.2.10"
+      ],
+      "error": null
+    },
+    {
+      "query_name": "example.com",
+      "record_type": "AAAA",
+      "status": "success",
+      "records": [
+        "2001:db8::10"
+      ],
+      "error": null
+    },
+    {
+      "query_name": "example.com",
+      "record_type": "MX",
+      "status": "success",
+      "records": [
+        "10 mail.example.com"
+      ],
+      "error": null
+    },
+    {
+      "query_name": "example.com",
+      "record_type": "NS",
+      "status": "success",
+      "records": [
+        "ns1.example.com",
+        "ns2.example.com"
+      ],
+      "error": null
+    },
+    {
+      "query_name": "example.com",
+      "record_type": "TXT",
+      "status": "success",
+      "records": [
+        "google-site-verification=abc123",
+        "v=spf1 include:_spf.example.net ~all"
+      ],
+      "error": null
+    },
+    {
+      "query_name": "_dmarc.example.com",
+      "record_type": "TXT",
+      "status": "success",
+      "records": [
+        "v=DMARC1; p=none"
+      ],
+      "error": null
+    },
+    {
+      "query_name": "s1._domainkey.example.com",
+      "record_type": "TXT",
+      "status": "success",
+      "records": [
+        "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEF"
+      ],
+      "error": null
+    }
+  ],
+  "findings": [
+    {
+      "id": "SPF-100:example.com",
+      "category": "email-authentication",
+      "check": "spf",
+      "status": "pass",
+      "severity": null,
+      "title": "SPF record passed basic checks",
+      "description": "Exactly one SPF record was found and no issues were detected by TraceDNS's basic checks. Includes and redirects are not followed, so this is not a full SPF evaluation.",
+      "evidence": [
+        "SPF record: v=spf1 include:_spf.example.net ~all"
+      ],
+      "recommendation": "No action required.",
+      "rule_id": "SPF-100"
+    },
+    {
+      "id": "SPF-006:example.com",
+      "category": "email-authentication",
+      "check": "spf",
+      "status": "finding",
+      "severity": "info",
+      "title": "SPF policy ends with softfail '~all'",
+      "description": "'~all' asks receivers to treat unlisted senders as suspicious but not to reject them outright. This is a common deliberate choice, often paired with DMARC.",
+      "evidence": [
+        "SPF record: v=spf1 include:_spf.example.net ~all"
+      ],
+      "recommendation": "No change is required. Consider '-all' if you are confident every sending source is listed.",
+      "rule_id": "SPF-006"
+    },
+    {
+      "id": "DMARC-100:_dmarc.example.com",
+      "category": "email-authentication",
+      "check": "dmarc",
+      "status": "pass",
+      "severity": null,
+      "title": "DMARC record passed basic checks",
+      "description": "Exactly one DMARC record was found with a valid version and policy. This is a basic syntax and policy check, not a full DMARC conformance test.",
+      "evidence": [
+        "DMARC record: v=DMARC1; p=none"
+      ],
+      "recommendation": "No action required.",
+      "rule_id": "DMARC-100"
+    },
+    {
+      "id": "DMARC-007:_dmarc.example.com",
+      "category": "email-authentication",
+      "check": "dmarc",
+      "status": "finding",
+      "severity": "info",
+      "title": "DMARC policy is monitoring-only (p=none)",
+      "description": "'p=none' asks receivers to take no action on failing mail. This is a normal first stage while collecting reports, and is not a vulnerability by itself.",
+      "evidence": [
+        "DMARC record: v=DMARC1; p=none"
+      ],
+      "recommendation": "Review aggregate reports, then move to 'p=quarantine' or 'p=reject' once legitimate mail passes DMARC.",
+      "rule_id": "DMARC-007"
+    },
+    {
+      "id": "DMARC-009:_dmarc.example.com",
+      "category": "email-authentication",
+      "check": "dmarc",
+      "status": "finding",
+      "severity": "info",
+      "title": "DMARC aggregate reporting is not configured",
+      "description": "There is no 'rua=' tag, so you will not receive aggregate reports showing which sources send mail using this domain.",
+      "evidence": [
+        "DMARC record: v=DMARC1; p=none"
+      ],
+      "recommendation": "Add 'rua=mailto:<address>' to receive aggregate reports.",
+      "rule_id": "DMARC-009"
+    },
+    {
+      "id": "DKIM-100:s1._domainkey.example.com",
+      "category": "email-authentication",
+      "check": "dkim",
+      "status": "pass",
+      "severity": null,
+      "title": "DKIM key record found for the selector",
+      "description": "A key record with a public key was found. This does not prove that the domain's mail is signed with this selector or that signatures verify.",
+      "evidence": [
+        "DKIM record: v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEF"
+      ],
+      "recommendation": "No action required.",
+      "rule_id": "DKIM-100"
+    }
+  ],
+  "summary": {
+    "queries_attempted": 7,
+    "queries_completed": 7,
+    "queries_failed": 0,
+    "assessments_total": 6,
+    "passed": 3,
+    "findings_total": 3,
+    "findings_by_severity": {
+      "high": 0,
+      "medium": 0,
+      "low": 0,
+      "info": 3
+    },
+    "errors": 0,
+    "inconclusive": 0,
+    "skipped": 0
+  }
+}
