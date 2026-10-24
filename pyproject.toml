@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tracedns"
+version = "1.0.0"
+description = "A modular Python CLI for DNS record analysis and evidence-based assessment of domain and email-security configurations."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "PranavY-01" }]
+keywords = ["dns", "spf", "dmarc", "dkim", "security", "cli"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: Name Service (DNS)",
+    "Topic :: Security",
+]
+dependencies = [
+    "typer>=0.12,<1.0",
+    "rich>=13.7,<16",
+    "dnspython>=2.6,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Repository = "https://github.com/PranavY-01/TraceDNS"
+
+[project.scripts]
+tracedns = "tracedns.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tracedns", "helpers"]
+
+[tool.ruff.lint.per-file-ignores]
+# Terminal glyphs such as "›" are intentional.
+"src/tracedns/reporter.py" = ["RUF001"]

@@ -1,0 +1,33 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local environment files
+.env
+.env.*
+
+# Generated scan reports (the illustrative fixture in examples/ is tracked)
+*.report.json
+report.json
+reports/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
