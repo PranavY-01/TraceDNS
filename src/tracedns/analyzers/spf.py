@@ -8,10 +8,14 @@ Implemented checks (and nothing more):
   forbidden arguments, ip4/ip6 networks, CIDR lengths, duplicate
   ``redirect``/``exp`` modifiers;
 * the qualifier on ``all`` (``+``, ``?``, ``~``, ``-``), a missing ``all`` and
-  ``redirect``, terms placed after ``all``, and use of ``ptr``.
+  ``redirect``, terms placed after ``all``, and use of ``ptr``;
+* more than 10 DNS-lookup terms at the top level of the record (a lower
+  bound on the RFC 7208 section 4.6.4 limit, since included records are
+  not fetched).
 
-Not implemented: following ``include``/``redirect``, the 10-lookup limit,
-macro expansion, or evaluating whether a given host is authorized.
+Not implemented: following ``include``/``redirect`` (so lookups inside
+included records are not counted), macro expansion, or evaluating whether a
+given host is authorized.
 """
 
 from __future__ import annotations
@@ -30,6 +34,9 @@ _DIRECTIVE = re.compile(r"^(?P<qualifier>[+\-~?]?)(?P<name>[A-Za-z0-9]+)(?P<rest
 _MODIFIER = re.compile(r"^(?P<name>[A-Za-z][A-Za-z0-9_.\-]*)=(?P<value>.*)$")
 _DUAL_CIDR = re.compile(r"^(?::(?P<domain>[^/]+))?(?:/(?P<v4>\d+))?(?://(?P<v6>\d+))?$")
 _UNIQUE_MODIFIERS = frozenset({"redirect", "exp"})
+# RFC 7208 section 4.6.4: terms that cause DNS lookups, and the evaluation limit.
+LOOKUP_MECHANISMS = frozenset({"include", "a", "mx", "ptr", "exists"})
+DNS_LOOKUP_LIMIT = 10
 
 
 def is_spf_record(text: str) -> bool:
@@ -66,6 +73,7 @@ def _analyze_record(domain: str, record: str) -> list[Finding]:
     redirect_term: str | None = None
     ptr_terms: list[str] = []
     after_all: list[str] = []
+    lookup_terms: list[str] = []  # only terms that can be reached during evaluation
 
     for index, term in enumerate(terms):
         problem = _term_problem(term, seen_modifiers)
@@ -82,6 +90,8 @@ def _analyze_record(domain: str, record: str) -> list[Finding]:
         name = directive["name"].lower()
         if all_index is not None:
             after_all.append(term)
+        elif name in LOOKUP_MECHANISMS:
+            lookup_terms.append(term)
         if name == "all" and all_index is None:
             all_index = index
             all_qualifier = directive["qualifier"]
@@ -107,6 +117,12 @@ def _analyze_record(domain: str, record: str) -> list[Finding]:
 
     if ptr_terms:
         findings.append(make_finding("SPF-009", domain, [evidence, *ptr_terms]))
+
+    if all_index is None and redirect_term:
+        lookup_terms.append(redirect_term)  # redirect is only followed when 'all' is absent
+    if len(lookup_terms) > DNS_LOOKUP_LIMIT:
+        summary = f"{len(lookup_terms)} lookup terms at the top level: {' '.join(lookup_terms)}"
+        findings.append(make_finding("SPF-010", domain, [evidence, summary]))
 
     if not has_issue(findings):
         findings.insert(0, make_finding("SPF-100", domain, [evidence]))

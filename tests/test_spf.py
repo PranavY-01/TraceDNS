@@ -22,7 +22,14 @@ def test_missing_spf_when_query_succeeded():
     assert rule_ids(findings) == ["SPF-001"]
     assert findings[0].status is FindingStatus.FINDING
     assert findings[0].severity is Severity.MEDIUM
-    assert "none begin with 'v=spf1'" in findings[0].evidence[0]
+    assert "none starts with the 'v=spf1' version term" in findings[0].evidence[0]
+
+
+def test_version_glued_to_a_mechanism_is_not_spf():
+    # "v=spf1-all" starts with the characters "v=spf1" but not with the version term.
+    findings = analyze_spf(txt_result("v=spf1-all"))
+    assert rule_ids(findings) == ["SPF-001"]
+    assert "none starts with the 'v=spf1' version term" in findings[0].evidence[0]
 
 
 def test_missing_spf_when_no_txt_records():
@@ -144,6 +151,36 @@ def test_terms_after_all_are_flagged():
     findings = analyze_spf(txt_result("v=spf1 -all include:late.example"))
     after = [f for f in findings if f.rule_id == "SPF-008"]
     assert after and "Ignored: include:late.example" in after[0].evidence
+
+
+def includes(count):
+    return " ".join(f"include:s{i}.example.net" for i in range(count))
+
+
+def test_more_than_ten_lookup_terms_exceeds_the_limit():
+    findings = analyze_spf(txt_result(f"v=spf1 {includes(12)} -all"))
+    limit = [f for f in findings if f.rule_id == "SPF-010"]
+    assert limit and limit[0].severity is Severity.MEDIUM
+    assert any(line.startswith("12 lookup terms") for line in limit[0].evidence)
+    assert "SPF-100" not in rule_ids(findings)
+
+
+def test_ten_lookup_terms_is_within_the_limit():
+    record = f"v=spf1 {includes(7)} a mx exists:%{{i}}.x.example ip4:192.0.2.1 -all"
+    assert rule_ids(analyze_spf(txt_result(record))) == ["SPF-100"]
+
+
+def test_every_lookup_mechanism_and_redirect_count():
+    record = f"v=spf1 {includes(6)} a mx ptr exists:x.example redirect=_spf.example.net"
+    findings = analyze_spf(txt_result(record))
+    limit = [f for f in findings if f.rule_id == "SPF-010"]
+    assert limit and any(line.startswith("11 lookup terms") for line in limit[0].evidence)
+
+
+def test_terms_that_are_never_evaluated_do_not_count():
+    # Mechanisms after 'all' and a redirect alongside 'all' are never reached.
+    record = f"v=spf1 {includes(10)} -all {includes(3)} redirect=_spf.example.net"
+    assert "SPF-010" not in rule_ids(analyze_spf(txt_result(record)))
 
 
 def test_ptr_is_flagged():

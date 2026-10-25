@@ -59,7 +59,8 @@ def absence_evidence(result: DNSResult, marker: str) -> str:
     if not result.records:
         return f"{result.query_name} has no TXT records."
     return (
-        f"{result.query_name} has {len(result.records)} TXT record(s); none begin with '{marker}'."
+        f"{result.query_name} has {len(result.records)} TXT record(s); "
+        f"none starts with the '{marker}' version term."
     )
 
 

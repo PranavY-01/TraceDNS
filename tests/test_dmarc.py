@@ -65,13 +65,25 @@ def test_version_must_be_first():
     assert rule_ids(dmarc("v=DMARC; v=DMARC1; p=reject")) == ["DMARC-003"]
 
 
-def test_missing_policy():
-    assert "DMARC-004" in rule_ids(dmarc("v=DMARC1; rua=mailto:d@example.com"))
+def test_missing_policy_is_low_because_rfc_9989_treats_it_as_none():
+    findings = dmarc("v=DMARC1; rua=mailto:d@example.com")
+    assert rule_ids(findings) == ["DMARC-004"]
+    assert findings[0].severity is Severity.LOW
+    assert "RFC 9989" in findings[0].description
 
 
 def test_invalid_policy_value():
     findings = dmarc("v=DMARC1; p=block; rua=mailto:d@example.com")
     assert "DMARC-005" in rule_ids(findings)
+    assert "DMARC-100" not in rule_ids(findings)
+
+
+@pytest.mark.parametrize("tag", ["sp", "np"])
+def test_invalid_subdomain_policies_are_as_serious_as_invalid_p(tag):
+    findings = dmarc(f"v=DMARC1; p=reject; {tag}=maybe; rua=mailto:d@example.com")
+    invalid = [f for f in findings if f.rule_id == "DMARC-005"]
+    assert invalid and invalid[0].severity is Severity.MEDIUM
+    assert f"Observed: {tag}=maybe" in invalid[0].evidence
     assert "DMARC-100" not in rule_ids(findings)
 
 
@@ -97,17 +109,67 @@ def test_p_none_is_info_not_vulnerability():
 
 
 def test_malformed_tags_and_values():
-    findings = dmarc("v=DMARC1; p=reject; pct=150; adkim=x; sp=maybe; junk; p=none")
+    findings = dmarc("v=DMARC1; p=reject; adkim=x; aspf=q; t=maybe; psd=x; fo=2; junk; p=none")
     malformed = [f for f in findings if f.rule_id == "DMARC-006"]
     assert malformed
     text = " ".join(malformed[0].evidence)
-    for fragment in ["pct=150", "adkim=x", "sp=maybe", "'junk'", "Duplicate tag 'p'"]:
+    expected = ["adkim=x", "aspf=q", "t=maybe", "psd=x", "fo=2", "'junk'", "Duplicate tag 'p'"]
+    for fragment in expected:
         assert fragment in text
 
 
-def test_pct_below_100_is_observed():
-    findings = dmarc("v=DMARC1; p=quarantine; pct=25; rua=mailto:d@example.com")
-    assert "DMARC-008" in rule_ids(findings)
+@pytest.mark.parametrize(
+    ("rua", "fragment"),
+    [("notauri", "is not a URI"), ("mailto:reports", "not a valid mailto"), ("a@b.c", "not a URI")],
+)
+def test_report_addresses_must_be_uris(rua, fragment):
+    findings = dmarc(f"v=DMARC1; p=reject; rua={rua}")
+    malformed = [f for f in findings if f.rule_id == "DMARC-006"]
+    assert malformed and any(fragment in line for line in malformed[0].evidence)
+
+
+def test_valid_report_uris_pass():
+    record = (
+        "v=DMARC1; p=reject; rua=mailto:a@example.com, mailto:b@example.net!10m; "
+        "ruf=mailto:f@example.com; fo=0:d:s"
+    )
+    assert rule_ids(dmarc(record)) == ["DMARC-100"]
+
+
+@pytest.mark.parametrize("tags", ["pct=25", "rf=afrf", "ri=86400", "pct=100; rf=afrf; ri=3600"])
+def test_tags_removed_by_rfc_9989_are_reported_as_legacy(tags):
+    findings = dmarc(f"v=DMARC1; p=quarantine; {tags}; rua=mailto:d@example.com")
+    assert rule_ids(findings) == ["DMARC-100", "DMARC-011"]
+    legacy = findings[1]
+    assert legacy.severity is Severity.INFO
+    for tag in tags.split("; "):
+        assert f"Observed: {tag}" in legacy.evidence
+
+
+def test_test_mode_is_observed_with_an_enforcing_policy():
+    findings = dmarc("v=DMARC1; p=reject; t=y; rua=mailto:d@example.com")
+    assert rule_ids(findings) == ["DMARC-100", "DMARC-012"]
+
+
+def test_test_mode_is_not_reported_when_policy_is_none():
+    # RFC 9989: 't' has no effect when the policy is 'none'.
+    findings = dmarc("v=DMARC1; p=none; t=y; rua=mailto:d@example.com")
+    assert "DMARC-012" not in rule_ids(findings)
+
+
+def test_t_n_and_psd_values_are_accepted():
+    findings = dmarc("v=DMARC1; p=reject; t=n; psd=n; rua=mailto:d@example.com")
+    assert rule_ids(findings) == ["DMARC-100"]
+
+
+def test_weaker_non_existent_subdomain_policy_is_observed():
+    findings = dmarc("v=DMARC1; p=reject; np=none; rua=mailto:d@example.com")
+    assert rule_ids(findings) == ["DMARC-100", "DMARC-013"]
+
+
+def test_np_with_enforcement_is_accepted():
+    findings = dmarc("v=DMARC1; p=reject; sp=quarantine; np=reject; rua=mailto:d@example.com")
+    assert rule_ids(findings) == ["DMARC-100"]
 
 
 def test_missing_rua_is_observed():
