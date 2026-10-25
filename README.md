@@ -1,5 +1,9 @@
 # TraceDNS
 
+[![CI](https://github.com/PranavY-01/TraceDNS/actions/workflows/ci.yml/badge.svg)](https://github.com/PranavY-01/TraceDNS/actions/workflows/ci.yml)
+![Python 3.11–3.13](https://img.shields.io/badge/python-3.11%E2%80%933.13-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
 **A modular Python-based cybersecurity utility for DNS record analysis and evidence-based assessment of domain and email-security configurations.**
 
 TraceDNS queries a domain's `A`, `AAAA`, `MX`, `NS`, and `TXT` records, runs basic SPF and DMARC checks, and optionally looks up a DKIM key for a selector you supply. Each result quotes the DNS data it is based on, has a transparent severity, and comes with a remediation recommendation. Results are shown in a Rich-powered terminal interface and can be exported as JSON.
@@ -8,7 +12,9 @@ It is intended for cybersecurity students, system administrators, and authorized
 
 > **New to TraceDNS?** The [user guide](docs/user-guide.md) explains what it checks, how to run it, and how to read the results, in plain language.
 >
-> **Developer?** The [developer demo guide](docs/demo-guide.md) walks through every feature alongside the code and tests behind it. The design is described in [docs/architecture.md](docs/architecture.md).
+> **Developer?** The [developer demo guide](docs/demo-guide.md) walks through every feature alongside the code and tests behind it. The design is described in [docs/architecture.md](docs/architecture.md), and changes are listed in the [changelog](CHANGELOG.md).
+
+![A TraceDNS scan of example.com](docs/images/scan-clean.svg)
 
 ---
 
@@ -53,14 +59,16 @@ TraceDNS gives a quick, readable, evidence-backed view of these configurations. 
 
 - **DNS record lookup** for `A`, `AAAA`, `MX`, `NS`, and `TXT`, with finite, configurable timeouts.
 - **Precise query outcomes:** records found, no records (`NOERROR`/no data), `NXDOMAIN`, timeout, `SERVFAIL`, `REFUSED`, and other errors are all reported separately. A missing record is never confused with a failed query.
-- **Basic SPF checks:** presence, multiple records, term syntax (mechanisms, qualifiers, `ip4`/`ip6` networks, CIDR lengths, duplicate modifiers), the `all` qualifier, missing `all`/`redirect`, terms after `all`, and use of `ptr`.
-- **Basic DMARC checks:** presence, duplicate records, version tag, required `p=` tag and its value, malformed or duplicate tags, `sp`/`pct`/`adkim`/`aspf` values, plus observations for `p=none`, `pct<100`, missing `rua`, and a weaker `sp`.
-- **Optional DKIM lookup** at `<selector>._domainkey.<domain>`: key presence, revoked keys, malformed tags, invalid base64, unknown key types, and testing mode.
+- **Basic SPF checks (RFC 7208):** presence, multiple records, term syntax (mechanisms, qualifiers, `ip4`/`ip6` networks, CIDR lengths, duplicate modifiers), the `all` qualifier, missing `all`/`redirect`, terms after `all`, use of `ptr`, and more than 10 DNS-lookup terms at the top level.
+- **Basic DMARC checks (RFC 9989):** presence, duplicate records, the version tag, and the `p`/`sp`/`np` policy values. Also checks malformed or duplicate tags, `adkim`/`aspf`/`t`/`psd`/`fo` values, and `rua`/`ruf` reporting URIs. Reports observations for `p=none`, missing `rua`, weaker `sp`/`np` policies, test mode (`t=y`), and the legacy tags RFC 9989 removed (`pct`, `rf`, `ri`).
+- **Optional DKIM lookup (RFC 6376)** at `<selector>._domainkey.<domain>`: key presence, revoked keys, malformed tags, unknown key types, and testing mode. The key itself is parsed: unusable keys are flagged, and RSA key sizes are judged against RFC 8301 (under 1024 bits is rejected by verifiers; under 2048 bits is weak).
 - **Structured findings** with a stable ID, rule ID, status, severity, evidence, and recommendation. Severity comes from a central rule catalog, not from the UI.
 - **Branded terminal interface:** banner, live stage progress, records table, finding panels, and a summary. Colors adapt to the terminal and output stays readable when redirected.
 - **Interactive welcome menu** when run with no command in a terminal.
 - **JSON export** to a file (written atomically, never silently overwritten) or to stdout in a JSON-only mode for scripts.
 - **Meaningful exit codes** that separate "issues found" from "the scan itself failed".
+- **Choice of resolver** with `--nameserver`, for comparing what different resolvers see.
+- **A published JSON Schema** ([`schema/report-1.1.json`](schema/report-1.1.json)) that the test suite validates reports against.
 
 ## Scope
 
@@ -69,8 +77,8 @@ TraceDNS gives a quick, readable, evidence-backed view of these configurations. 
 **Explicitly excluded from V1:**
 
 - Full DNSSEC chain-of-trust validation
-- Exhaustive SPF evaluation (following `include`/`redirect`, the 10-lookup limit, macro expansion)
-- Complete DMARC conformance testing and organizational-domain fallback
+- Exhaustive SPF evaluation (following `include`/`redirect`, counting lookups inside included records, macro expansion)
+- Complete DMARC conformance testing and the RFC 9989 DNS tree walk to the organizational domain
 - Automatic DKIM selector discovery
 - Zone transfers, subdomain enumeration, exploitation, or takeover attempts
 - Web dashboard, API, database, scan history, monitoring, or alerting
@@ -94,9 +102,9 @@ flowchart LR
 | `cli.py` | Typer commands, option parsing, input validation, exit codes, welcome menu |
 | `scanner.py` | Runs the queries each check needs (each once), applies analyzers, builds the report |
 | `resolver.py` | Domain and selector validation, DNS queries, mapping every outcome to a status |
-| `analyzers/spf.py` | Basic SPF checks |
-| `analyzers/dmarc.py` | Basic DMARC checks |
-| `analyzers/dkim.py` | Selector-based DKIM lookup and basic key-record checks |
+| `analyzers/spf.py` | Basic SPF checks (RFC 7208) |
+| `analyzers/dmarc.py` | Basic DMARC checks (RFC 9989) |
+| `analyzers/dkim.py` | Selector-based DKIM lookup, key-record checks, and key parsing (RFC 6376, RFC 8301) |
 | `rules.py` | Central catalog of rule IDs, statuses, severities, and recommendations |
 | `models.py` | Dataclasses for DNS results, findings, and reports; summary counts |
 | `reporter.py` | Banner, progress, tables, panels, summary, and JSON serialization |
@@ -119,13 +127,20 @@ TraceDNS/
 │       ├── spf.py
 │       ├── dmarc.py
 │       └── dkim.py
-├── tests/
-├── examples/sample-report.json
+├── tests/                          # offline test suite (no network)
+├── schema/report-1.1.json          # JSON Schema for reports
+├── examples/sample-report.json     # illustrative report from test fixtures
+├── scripts/
+│   ├── capture_screenshots.py      # regenerates docs/images/ from live runs
+│   └── generate_sample_report.py   # regenerates the sample report
 ├── docs/
 │   ├── user-guide.md
 │   ├── demo-guide.md
-│   └── architecture.md
+│   ├── architecture.md
+│   └── images/                     # screenshots
+├── .github/workflows/ci.yml        # lint + tests on Python 3.11–3.13
 ├── pyproject.toml
+├── CHANGELOG.md
 ├── README.md
 └── LICENSE
 ```
@@ -140,8 +155,10 @@ TraceDNS/
 | [dnspython](https://www.dnspython.org/) | DNS resolution |
 | [pytest](https://docs.pytest.org/) | Automated tests (development) |
 | [Ruff](https://docs.astral.sh/ruff/) | Linting and formatting (development) |
+| [jsonschema](https://python-jsonschema.readthedocs.io/) | Validating reports against the published schema in tests (development) |
+| [GitHub Actions](https://docs.github.com/actions) | CI: lint and tests on Python 3.11–3.13, Ubuntu and Windows |
 
-JSON serialization uses the standard library. There are no other runtime dependencies.
+JSON serialization and DKIM key parsing use the standard library. There are no other runtime dependencies.
 
 ## Installation
 
@@ -175,7 +192,7 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-`.[dev]` also installs pytest and Ruff. To install only the runtime dependencies, use `python -m pip install -e .`.
+`.[dev]` also installs pytest, Ruff, and jsonschema. To install only the runtime dependencies, use `python -m pip install -e .`.
 
 Confirm the install:
 
@@ -209,6 +226,10 @@ tracedns scan example.com --json report.json --overwrite
 
 # JSON only, on stdout, for scripts and pipelines
 tracedns scan example.com --json - > report.json
+
+# Ask a specific resolver instead of the system one (IP addresses only)
+tracedns scan example.com --nameserver 1.1.1.1
+tracedns scan example.com -n 9.9.9.9,2620:fe::fe
 ```
 
 **Input rules.** TraceDNS accepts bare, fully qualified domain names. Input is case-insensitive, a trailing dot is allowed, and internationalized names are converted to their `xn--` form. URLs, paths, ports, e-mail addresses, IP addresses, and single-label names (such as `localhost` or internal hostnames) are rejected.
@@ -244,6 +265,7 @@ tracedns scan DOMAIN [OPTIONS]
 | `-j, --json PATH` | Write a JSON report to `PATH`; `-` writes JSON only to stdout. | no report |
 | `--overwrite` | Allow replacing an existing report file. | off |
 | `-t, --timeout SECONDS` | Maximum time per DNS query (0.5–60). | `5.0` |
+| `-n, --nameserver IP` | Resolver IP address to query instead of the system resolver. Comma-separated or repeated. | system resolver |
 | `-v, --verbose` | Show a traceback for unexpected internal errors. | off |
 
 Checks fetch the names they need even if you don't list `TXT` with `--record`. SPF reads the domain's TXT records, DMARC queries `_dmarc.<domain>`, and DKIM queries `<selector>._domainkey.<domain>`. These queries appear in the records table and the JSON report.
@@ -269,67 +291,50 @@ Only `finding` entries carry a **severity**:
 | Severity | Used for |
 |---|---|
 | `high` | A policy that explicitly authorizes every sender (`+all`) |
-| `medium` | Missing or invalid SPF/DMARC records, duplicate records, a missing DMARC policy, or a DKIM record with no key |
-| `low` | Weak but valid settings (`?all`, no `all`, `ptr`), malformed optional tags, missing or revoked DKIM keys for the given selector |
-| `info` | Observations that are often deliberate: `~all`, `p=none`, `pct<100`, no `rua`, DKIM testing mode |
+| `medium` | Missing or invalid SPF/DMARC records, duplicate records, invalid DMARC policy values, an SPF record over the 10-lookup limit, a DKIM record with no key, an unparseable key, or an RSA key under 1024 bits |
+| `low` | Weak but valid settings (`?all`, no `all`, `ptr`, RSA keys under 2048 bits), a DMARC record without `p=`, malformed optional tags, missing or revoked DKIM keys for the given selector |
+| `info` | Observations that are often deliberate: `~all`, `p=none`, no `rua`, DMARC or DKIM test mode, legacy DMARC tags (`pct`, `rf`, `ri`) |
 
 TraceDNS does not produce an aggregate risk score. The full rule catalog is in [docs/architecture.md](docs/architecture.md#rule-catalog).
 
 ## Sample output
 
-The excerpt below is genuine output from `tracedns scan example.com --checks spf,dmarc`. It was captured on 24 October 2026 with output redirected, so colors are not shown. Live DNS data changes over time.
+These screenshots are **unedited output from live runs** of TraceDNS 1.1.0 on 25 October 2026. They were recorded with Rich's SVG export by [`scripts/capture_screenshots.py`](scripts/capture_screenshots.py), the same renderer that draws the terminal. Live DNS changes over time, so a run today may differ.
 
-```text
-TRACEDNS v1.0.0 · DNS INTELLIGENCE · SECURITY AUDITING
+**Welcome screen** (`tracedns`)
 
- example.com  ─────────────────────────────────────────────────────────────────────────
-  records A, AAAA, MX, NS, TXT  ·  checks spf, dmarc  ·  timeout 5s
+![TraceDNS welcome screen](docs/images/welcome.svg)
 
-  ✓ Validating target       example.com
-  ✓ Querying DNS records    5 queries, 5 with records
-  ✓ Analyzing SPF           passed
-  ✓ Analyzing DMARC         passed with 1 observation(s)
-  ✓ Building report         3 assessment result(s)
+**A scan with a finding** (`tracedns scan example.com --dkim-selector default`). The `default` selector publishes an empty key, which RFC 6376 defines as revoked.
 
- ...records table and finding panels...
+![Scan with a DKIM finding](docs/images/scan-findings.svg)
 
-┌─  INFO  DMARC aggregate reporting is not configured  ───────────────────────────────┐
-│ There is no 'rua=' tag, so you will not receive aggregate reports showing which     │
-│ sources send mail using this domain.                                                │
-│                                                                                     │
-│ Evidence                                                                            │
-│   › DMARC record: v=DMARC1;p=reject;sp=reject;adkim=s;aspf=s                        │
-│                                                                                     │
-│ Recommendation                                                                      │
-│   Add 'rua=mailto:<address>' to receive aggregate reports.                          │
-└───────────────────────────────────────────────────────────────  DMARC-009 · dmarc  ─┘
+**A domain that does not exist** (`tracedns scan nothing-here.example`). The checks are inconclusive rather than reporting "missing record" findings that would be false.
 
-┌─  Scan summary  ─────────────────────────────────────────────────────────────┐
-│  Target       example.com                                                    │
-│  Status       completed                                                      │
-│  Queries      6 attempted · 6 completed · 0 failed                           │
-│  Assessments  2 passed · 1 findings · 0 errors · 0 inconclusive · 0 skipped  │
-│  Severity     0 high · 0 medium · 0 low · 1 info                             │
-│  Duration     0.09s                                                          │
-└──────────────────────────────────────────────────────────────────────────────┘
+![Scan of a non-existent domain](docs/images/scan-nxdomain.svg)
+
+**Invalid input** (`tracedns scan https://example.com/login`). The input is rejected with exit code 2, and no query is sent.
+
+![Invalid input error](docs/images/invalid-input.svg)
+
+### Updating the screenshots
+
+```bash
+python scripts/capture_screenshots.py
 ```
 
-### Capturing screenshots
-
-To add screenshots, take them from a real run. Do not use edited or mocked output.
-
-1. Use a dark terminal theme (Windows Terminal, iTerm2, GNOME Terminal) with a true-color profile and a width of at least 100 columns.
-2. Run `tracedns` for the welcome screen, and `tracedns scan <your-domain>` for a full scan.
-3. Save the images in `docs/images/` and reference them from this section, noting the command and date for each.
+The script runs the real CLI against live DNS (only `example.com` and the reserved `.example` TLD) and rewrites `docs/images/*.svg`. Never hand-edit the images.
 
 ## JSON report
 
 Every report has seven top-level fields: `schema_version`, `tool`, `target`, `scan`, `dns_results`, `findings`, `summary`. A report stays valid when checks fail: failed queries appear with their status and error, and the scan status becomes `partial` or `failed`.
 
+The contract is published as a JSON Schema in [`schema/report-1.1.json`](schema/report-1.1.json). The test suite validates the sample report and generated reports (healthy, failing, non-existent domain, and findings) against it. The tests also check that the schema's status and severity vocabularies match the code. Schema version 1.1 adds `scan.nameservers`; see the [changelog](CHANGELOG.md).
+
 ```json
 {
-  "schema_version": "1.0",
-  "tool": { "name": "TraceDNS", "version": "1.0.0" },
+  "schema_version": "1.1",
+  "tool": { "name": "TraceDNS", "version": "1.1.0" },
   "target": { "domain": "example.com" },
   "scan": {
     "started_at": "2026-10-24T13:33:27.417497+00:00",
@@ -339,7 +344,8 @@ Every report has seven top-level fields: `schema_version`, `tool`, `target`, `sc
     "record_types": ["A", "AAAA", "MX", "NS", "TXT"],
     "checks": ["spf", "dmarc", "dkim"],
     "dkim_selector": "s1",
-    "timeout_seconds": 5.0
+    "timeout_seconds": 5.0,
+    "nameservers": []
   },
   "dns_results": [
     {
@@ -379,7 +385,7 @@ Every report has seven top-level fields: `schema_version`, `tool`, `target`, `sc
 }
 ```
 
-The JSON above is shortened. [`examples/sample-report.json`](examples/sample-report.json) is a complete report. Both are **illustrative fixtures**: they were generated by running TraceDNS against the controlled DNS responses used in the test suite (documentation addresses such as `192.0.2.10`), not from a live scan.
+The JSON above is shortened. [`examples/sample-report.json`](examples/sample-report.json) is a complete report. Both are **illustrative fixtures**: they were generated by running TraceDNS against the controlled DNS responses used in the test suite (documentation addresses such as `192.0.2.10`), not from a live scan. Regenerate the sample with `python scripts/generate_sample_report.py`.
 
 **Count semantics:** `findings_total` and `findings_by_severity` count only entries with status `finding`. `assessments_total` counts every entry in `findings`. `queries_completed` counts queries that got a definitive answer (`success`, `not_found`, `nxdomain`). Each item is counted once.
 
@@ -394,11 +400,14 @@ ruff format --check .      # formatting
 The suite needs no network access. A fixture blocks sockets for every test, and DNS responses come from a fake resolver backend that returns real dnspython record objects and raises real dnspython exceptions. It covers:
 
 - **Resolver:** successful, multi-record, and empty answers; NXDOMAIN; timeout; SERVFAIL; REFUSED; network failure; unexpected exceptions; TXT chunk joining; name validation.
-- **SPF:** single, missing, and multiple records; unrelated TXT records; qualifier rules; malformed and valid syntax variants.
-- **DMARC:** valid, missing, and duplicate records; version and policy errors; tag order and whitespace; malformed tags; DNS failure versus no record.
-- **DKIM:** selector found, missing, query failure, invalid selector, skipped, revoked or malformed keys, hostile record contents treated as data.
-- **Reporter:** finding display, severity styling, empty results, markup and escape-sequence injection, JSON schema, summary counts, existing files, write failures, interrupted writes.
-- **CLI:** help and version, valid and invalid input, record and check selection, DKIM, JSON file and stdout modes, every exit code, Ctrl+C, the welcome screen, and the interactive menu.
+- **SPF:** single, missing, and multiple records; unrelated TXT records; qualifier rules; malformed and valid syntax variants; the 10-lookup limit, including terms that are never evaluated.
+- **DMARC:** valid, missing, and duplicate records; version and policy errors (including `sp`/`np`); tag order and whitespace; malformed tags and reporting URIs; RFC 9989 test mode and legacy tags; DNS failure versus no record.
+- **DKIM:** selector found, missing, query failure, invalid selector, skipped, revoked or malformed keys, hostile record contents treated as data. Also real OpenSSL-generated RSA keys (512, 1024, and 2048 bits; SubjectPublicKeyInfo and PKCS#1), Ed25519 keys, and truncated or unparseable keys.
+- **Reporter:** finding display, severity styling, empty results, markup and escape-sequence injection, JSON layout, summary counts, existing files, write failures, interrupted writes.
+- **Schema:** the sample report and six generated scenarios validate against `schema/report-1.1.json`; contract violations are rejected; schema vocabularies match the code.
+- **CLI:** help and version, valid and invalid input, record and check selection, DKIM, `--nameserver`, JSON file and stdout modes, every exit code, Ctrl+C, the welcome screen, and the interactive menu.
+
+The same checks run in [GitHub Actions](.github/workflows/ci.yml) on every push and pull request: Ruff, then the suite on Python 3.11, 3.12, and 3.13, on Ubuntu and Windows.
 
 **Optional live smoke test** (not part of the suite; use a domain you are authorized to assess):
 
@@ -408,9 +417,9 @@ tracedns scan example.com --json - | python -m json.tool > /dev/null && echo "va
 
 ## Known limitations
 
-- **SPF:** `include` and `redirect` targets are not followed, the 10-DNS-lookup limit is not evaluated, and macros are not expanded. A `pass` means "no issues found by these basic checks", not "SPF evaluates correctly for every sender".
-- **DMARC:** if `_dmarc.<subdomain>` has no record, TraceDNS does not look up the organizational domain, so a policy inherited from the parent domain is not detected. Report URIs and external-destination authorization are not validated.
-- **DKIM:** only the selector you supply is checked. Finding a key does not prove the domain signs mail with it or that signatures verify. Not finding one does not mean the domain lacks DKIM.
+- **SPF:** `include` and `redirect` targets are not followed, and macros are not expanded. The 10-DNS-lookup limit is checked only for the terms in the record itself; lookups inside included records aren't counted, so a record can still exceed the limit without TraceDNS reporting it. A `pass` means "no issues found by these basic checks", not "SPF evaluates correctly for every sender".
+- **DMARC:** checks follow RFC 9989, which obsoletes RFC 7489. If `_dmarc.<subdomain>` has no record, TraceDNS does not perform the RFC 9989 DNS tree walk to the organizational domain, so a policy inherited from a parent domain is not detected. Reporting URIs are checked for URI syntax only; external-destination authorization (RFC 9990) is not verified.
+- **DKIM:** only the selector you supply is checked. A parseable key of adequate size still does not prove the domain signs mail with it or that signatures verify. Not finding a key does not mean the domain lacks DKIM.
 - **Resolver view:** results reflect what your configured resolver returns at scan time. Split-horizon DNS, caching, and propagation delays can produce different answers elsewhere.
 - **No DNSSEC validation**, and no checks of record types other than A, AAAA, MX, NS, and TXT.
 - **Policy, not behaviour:** TraceDNS reads published DNS policy. It does not test whether receivers enforce it, measure deliverability, or determine whether a domain has been spoofed or compromised.

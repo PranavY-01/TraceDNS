@@ -21,8 +21,8 @@ python -m pip install -e ".[dev]"     # runtime + pytest + ruff, editable instal
 Verify the toolchain:
 
 ```powershell
-tracedns --version        # TraceDNS 1.0.0
-python -m pytest -q       # 179 passed
+tracedns --version        # TraceDNS 1.1.0
+python -m pytest -q       # 232 passed
 ruff check .              # All checks passed!
 ruff format --check .     # all files already formatted
 ```
@@ -42,9 +42,12 @@ To read exit codes, use `$LASTEXITCODE` in PowerShell or `echo $?` in bash. Use 
 | Rule IDs, severities, remediation text | `src/tracedns/rules.py` | covered through the analyzer tests |
 | Data model, summary counts, scan status | `src/tracedns/models.py` | `tests/test_reporter.py` |
 | Rich rendering, atomic JSON writes | `src/tracedns/reporter.py` | `tests/test_reporter.py` |
-| Fake DNS backend, network guard | `tests/helpers.py`, `tests/conftest.py` | – |
+| Report contract | `schema/report-1.1.json` | `tests/test_schema.py` |
+| Fake DNS backend, test keys, network guard | `tests/helpers.py`, `tests/conftest.py` | – |
+| Sample report, screenshots | `scripts/generate_sample_report.py`, `scripts/capture_screenshots.py` | – |
+| CI | `.github/workflows/ci.yml` | runs Ruff + the suite on 3.11–3.13, Ubuntu and Windows |
 
-Full design notes are in [architecture.md](architecture.md).
+Full design notes are in [architecture.md](architecture.md). Release notes are in [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
@@ -179,7 +182,51 @@ python -m pytest tests/test_dkim.py -v -k "treated_as_data"
 
 **What it demonstrates:** TXT content such as `[bold red]` or raw escape sequences is never interpreted. `reporter.safe_text` escapes control characters and wraps values in `rich.text.Text`, so Rich markup isn't parsed. Long values are shortened in the table but kept complete in JSON.
 
-### 10. Debugging aids
+### 10. Choosing the resolver (live)
+
+```powershell
+tracedns scan example.com -r A,NS -c none --nameserver 1.1.1.1
+tracedns scan example.com -n 9.9.9.9,2620:fe::fe --json - | ConvertFrom-Json | Select-Object -ExpandProperty scan
+tracedns scan example.com -n dns.google      # exit 2: IP addresses only
+```
+
+**Expect:** the header line ends with `resolver 1.1.1.1`, and the JSON `scan.nameservers` lists the normalized addresses (an empty list means the system resolver). A hostname is rejected with exit code 2 before any query is sent.
+
+**Code path:** `resolver.normalize_nameserver` (uses `ipaddress`, so choosing a resolver never needs a DNS lookup) → `cli.build_request` (deduplicates the addresses) → `DNSResolver(nameservers=...)`, which uses `dns.resolver.Resolver(configure=False)`, so a machine with a broken resolver configuration can still scan.
+
+**Tests:** `python -m pytest tests/test_cli.py -k nameserver` (3 passed) and `test_explicit_nameservers_replace_system_configuration`.
+
+### 11. Standards checks (offline)
+
+```powershell
+python -m pytest tests/test_dmarc.py -v -k "rfc_9989 or test_mode or non_existent or report or subdomain"
+python -m pytest tests/test_spf.py -v -k "lookup or glued or never_evaluated"
+python -m pytest tests/test_dkim.py -v -k "rsa or ed25519 or pkcs1"
+```
+
+**Expect:** `18 passed`, `5 passed`, `9 passed`.
+
+| Area | Behaviour | Where |
+|---|---|---|
+| DMARC (RFC 9989) | `pct`/`rf`/`ri` are reported as legacy tags (DMARC-011). `t=y` with an enforcing policy is reported (DMARC-012), as is `np=none` (DMARC-013). Invalid `sp`/`np` are as serious as an invalid `p` (DMARC-005). A missing `p` is LOW, because RFC 9989 treats it as `p=none` | `analyzers/dmarc.py` |
+| SPF lookup limit | Counts `include`, `a`, `mx`, `ptr`, `exists` before `all`, plus `redirect` only when there's no `all`. More than 10 gives SPF-010 | `analyzers/spf.py` (`LOOKUP_MECHANISMS`) |
+| DKIM keys | A minimal DER reader returns the RSA modulus size from a SubjectPublicKeyInfo or a PKCS#1 key. Under 1024 bits gives DKIM-009, under 2048 gives DKIM-008, unparseable gives DKIM-007. Ed25519 keys must be 32 bytes | `analyzers/dkim.py` (`rsa_key_bits`) |
+
+The DKIM fixtures in `tests/helpers.py` are real public keys generated with OpenSSL. To check the parser against fresh keys:
+
+```bash
+openssl genrsa 3072 | openssl rsa -pubout -outform DER | python -c "import sys; from tracedns.analyzers.dkim import rsa_key_bits; print(rsa_key_bits(sys.stdin.buffer.read()))"   # 3072
+```
+
+### 12. Report schema (offline)
+
+```powershell
+python -m pytest tests/test_schema.py -v
+```
+
+**Expect:** `11 passed`. The suite validates `examples/sample-report.json` and six generated scenarios against `schema/report-1.1.json`, checks that contract violations are rejected (for example, a severity on a `pass`), and fails if the schema's enums drift from `models.py`. Any change to the report layout needs a new `SCHEMA_VERSION`, a new schema file, and a regenerated sample (`python scripts/generate_sample_report.py`).
+
+### 13. Debugging aids
 
 - `--verbose` prints a traceback for unexpected internal errors. Without it, the user sees a single line and exit code 3 (`test_unexpected_error_has_no_traceback`).
 - `--timeout 0.5` to `60` sets the per-query lifetime. Each nameserver attempt is capped at 2 seconds (`resolver.MAX_ATTEMPT_TIMEOUT_SECONDS`).
@@ -212,8 +259,9 @@ if [ "$status" -ne 0 ]; then echo "TraceDNS exit code $status"; exit "$status"; 
 1. Add or edit the entry in `rules._RULE_LIST`. The status and severity are set there, and `_rule` rejects a severity on non-FINDING rules.
 2. Emit it from the analyzer with `make_finding("<RULE-ID>", subject, evidence)`.
 3. Add analyzer tests for both the triggering case and a near miss.
-4. Update the rule catalog table in [architecture.md](architecture.md#rule-catalog).
-5. Run `python -m pytest -q`, `ruff check .`, and `ruff format --check .`.
+4. Update the rule catalog table in [architecture.md](architecture.md#rule-catalog) and add an entry to [CHANGELOG.md](../CHANGELOG.md). Never reuse a retired rule ID (for example, `DMARC-008`).
+5. Run `python -m pytest -q`, `ruff check .`, and `ruff format --check .`. CI runs the same checks on every push.
+6. If the change is visible in the terminal, refresh the screenshots with `python scripts/capture_screenshots.py`.
 
 ## Troubleshooting
 
@@ -221,7 +269,7 @@ if [ "$status" -ne 0 ]; then echo "TraceDNS exit code $status"; exit "$status"; 
 |---|---|---|
 | `tracedns` not recognized | Virtual environment not active | Activate `.venv`, or call `.venv\Scripts\tracedns.exe` |
 | `Activate.ps1` blocked | PowerShell execution policy | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| Every query `timeout`, scan `failed` | No DNS or network access | Expected operational-failure path (exit code 3). Offline scenarios 8 and 9 still work |
+| Every query `timeout`, scan `failed` | No DNS or network access | Expected operational-failure path (exit code 3). Offline scenarios 8, 9, 11 and 12 still work |
 | Live output differs from this guide | `example.com` DNS changed | Compare behaviour, not exact records |
 | `+ x !` instead of `✓ ✗ ▲` | Output encoding isn't UTF-8 | ASCII fallback by design; use Windows Terminal for Unicode |
 | `CategoryInfo … RemoteException` around errors | PowerShell 5.1 formatting of redirected stderr (`2>&1`) | Don't redirect stderr when reading errors interactively |

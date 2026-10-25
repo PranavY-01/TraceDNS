@@ -34,8 +34,8 @@ When these settings are missing or mistyped, the protection quietly stops workin
 
 - **Address and server records**: where the website and mail servers are (A, AAAA, MX, NS, and TXT records).
 - **SPF**: whether exactly one SPF record exists, whether it is written correctly, and how strictly it treats unknown senders.
-- **DMARC**: whether a DMARC record exists, whether it is written correctly, and which policy it sets.
-- **DKIM** (optional): whether a DKIM key is published for a *selector* you name. A selector is the label of a particular key.
+- **DMARC**: whether a DMARC record exists, whether it is written correctly under the current standard (RFC 9989, published 2026), and which policy it sets.
+- **DKIM** (optional): whether a DKIM key is published for a *selector* you name, and whether the key is usable and strong enough. A selector is the label of a particular key.
 
 TraceDNS only **reads public information**, the same way any email server does. It does not log in to anything, change anything, or probe for weaknesses.
 
@@ -80,7 +80,7 @@ python -m pip install -e .
 tracedns --version
 ```
 
-You should see `TraceDNS 1.0.0`.
+You should see `TraceDNS 1.1.0`.
 
 > Next time, you only need to repeat the "activate" line from step 2 before using TraceDNS.
 
@@ -108,6 +108,7 @@ TraceDNS shows its progress step by step, then prints:
 | Only look up records, without the email checks | `tracedns scan example.com --checks none` |
 | Only certain record types | `tracedns scan example.com --record A,MX` |
 | Save the results to a file | `tracedns scan example.com --json my-report.json` |
+| Ask a specific DNS service, such as Cloudflare's | `tracedns scan example.com --nameserver 1.1.1.1` |
 | See all options | `tracedns scan --help` |
 
 **Where do I find a DKIM selector?** Open an email sent from the domain and view its full headers ("Show original" or "View source" in most mail apps). Find the line starting `DKIM-Signature` and look for `s=`. The word after it is the selector.
@@ -153,8 +154,11 @@ At the bottom, the summary shows:
 | *SPF policy permits all senders* | The record says every server on the internet is allowed. | Change the ending from `+all` to `-all` or `~all`. |
 | *No DMARC record published* | Email providers have no instructions for handling fake mail. | Add a DMARC record, often starting with monitoring (`p=none`). |
 | *DMARC policy is monitoring-only* | Fake mail is reported, but not blocked yet. | A normal first stage. Tighten it once reports look healthy. |
+| *SPF record exceeds the 10 DNS-lookup limit* | The record points to so many other services that email providers give up checking it. | Remove services you no longer use, or list server addresses directly. |
+| *DMARC record uses tags removed by RFC 9989* | The record contains settings (such as `pct`) that the current DMARC standard has retired. | Remove them; use `t=y` to trial a policy instead. |
 | *No DKIM record found for the selector* | Nothing is published under that selector name. | Double-check the selector. The domain may use a different one. |
 | *DKIM key is revoked* | The key under that selector has been deliberately switched off. | Fine if it's retired. Otherwise, publish the current key. |
+| *DKIM RSA key is shorter than 2048 bits* | The signing key is older and weaker than today's recommendation. | Ask your email provider for a 2048-bit key. |
 
 ## Good to know
 

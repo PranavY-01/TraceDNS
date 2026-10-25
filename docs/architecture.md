@@ -96,11 +96,11 @@ Record normalization: A/AAAA are addresses; MX is `"<preference> <exchange>"`; N
 ### Report
 
 ```text
-schema_version   "1.0"
+schema_version   "1.1"
 tool             { name, version }
 target           { domain }
 scan             { started_at, finished_at, duration_seconds, status, record_types,
-                   checks, dkim_selector, timeout_seconds }
+                   checks, dkim_selector, timeout_seconds, nameservers }
 dns_results      [DNS query result]
 findings         [Finding]
 summary          { queries_attempted, queries_completed, queries_failed,
@@ -108,7 +108,9 @@ summary          { queries_attempted, queries_completed, queries_failed,
                    errors, inconclusive, skipped }
 ```
 
-Timestamps are ISO 8601 in UTC with an explicit `+00:00` offset.
+Timestamps are ISO 8601 in UTC with an explicit `+00:00` offset. `nameservers` lists the resolver IPs given with `--nameserver`; an empty list means the system resolver configuration.
+
+The machine-readable contract is [`schema/report-1.1.json`](../schema/report-1.1.json) (JSON Schema 2020-12). Beyond field types, it enforces two rules: a `severity` is present only when `status` is `finding`, and `records` is non-empty only when the query status is `success`. `tests/test_schema.py` validates the sample report and six generated scenarios against it, and fails if the schema's vocabularies drift from the enums in `models.py`. Any change to the report layout must bump `SCHEMA_VERSION` and add a new schema file.
 
 **Summary count semantics.** Each query and each finding is counted exactly once.
 
@@ -135,6 +137,8 @@ Timestamps are ISO 8601 in UTC with an explicit `+00:00` offset.
 | `error` | Any other failure: network unreachable, no resolver configuration, malformed response, unexpected exception | no |
 
 Each query has a finite lifetime (`--timeout`, default 5 s, range 0.5–60 s), with each individual nameserver attempt capped at 2 s. Retries happen only within that lifetime. One failed query does not stop other queries or checks.
+
+By default queries go to the system resolver configuration. `--nameserver IP` replaces it with the given resolver addresses (`dns.resolver.Resolver(configure=False)`), so a machine with a broken or missing resolver configuration can still scan. Only literal IP addresses are accepted, so choosing a resolver never itself requires a DNS lookup.
 
 ### Assessment status (analyzers)
 
@@ -172,17 +176,20 @@ Reports are written atomically: JSON goes to a temporary file in the destination
 | SPF-007 | finding | low | No `all` and no `redirect=` |
 | SPF-008 | finding | info | Mechanisms after `all`, or `redirect` alongside `all` |
 | SPF-009 | finding | low | `ptr` mechanism used |
+| SPF-010 | finding | medium | More than 10 DNS-lookup terms (`include`, `a`, `mx`, `ptr`, `exists`, `redirect`) reachable at the top level (RFC 7208 §4.6.4); a lower bound, since included records aren't fetched |
 | SPF-100 | pass | – | One record, no issue above info |
 | DMARC-001 | finding | medium | Query completed, no `v=DMARC1` record |
-| DMARC-002 | finding | medium | More than one candidate record |
-| DMARC-003 | finding | medium | First tag is not exactly `v=DMARC1` |
-| DMARC-004 | finding | medium | No `p=` tag |
-| DMARC-005 | finding | medium | `p=` not `none`/`quarantine`/`reject` |
-| DMARC-006 | finding | low | Malformed segments, duplicate tags, invalid `sp`/`pct`/`adkim`/`aspf` |
+| DMARC-002 | finding | medium | More than one candidate record (RFC 9989 §4.10: all are discarded) |
+| DMARC-003 | finding | medium | First tag is not exactly `v=DMARC1` (RFC 9989 §4.7) |
+| DMARC-004 | finding | low | No `p=` tag (RFC 9989 treats this as `p=none`) |
+| DMARC-005 | finding | medium | `p=`, `sp=` or `np=` not `none`/`quarantine`/`reject` (RFC 9989 §4.10.1) |
+| DMARC-006 | finding | low | Malformed segments, duplicate tags, invalid `adkim`/`aspf`/`t`/`psd`/`fo`, `rua`/`ruf` entries that are not URIs |
 | DMARC-007 | finding | info | `p=none` (monitoring-only) |
-| DMARC-008 | finding | info | `pct` below 100 with an enforcing policy |
 | DMARC-009 | finding | info | No `rua=` |
 | DMARC-010 | finding | info | `sp=none` with an enforcing `p=` |
+| DMARC-011 | finding | info | Tags removed by RFC 9989: `pct`, `rf`, `ri` |
+| DMARC-012 | finding | info | `t=y` (test mode) with an enforcing `p=` |
+| DMARC-013 | finding | info | `np=none` with an enforcing `p=` |
 | DMARC-100 | pass | – | One valid record, no issue above info |
 | DKIM-001 | finding | low | Query completed, no record at the selector |
 | DKIM-002 | finding | medium | No `p=` tag |
@@ -190,10 +197,17 @@ Reports are written atomically: JSON goes to a temporary file in the destination
 | DKIM-004 | finding | low | Empty `p=` (revoked key) |
 | DKIM-005 | finding | info | `t=y` testing flag |
 | DKIM-006 | finding | low | More than one TXT record at the selector |
-| DKIM-100 | pass | – | Key record with a valid public key |
+| DKIM-007 | finding | medium | `p=` decodes to neither an RSA public key (SubjectPublicKeyInfo or PKCS#1) nor a 32-byte Ed25519 key |
+| DKIM-008 | finding | low | RSA key of 1024–2047 bits (RFC 8301: signers should use ≥ 2048) |
+| DKIM-009 | finding | medium | RSA key under 1024 bits (RFC 8301 §3.2: verifiers must not accept it) |
+| DKIM-100 | pass | – | Key record with a parseable key of adequate size |
 | DKIM-800 | skipped | – | No selector supplied |
 | `*-900` | error | – | The check's DNS query failed |
 | `*-901` | inconclusive | – | Target domain does not exist |
+
+**Retired IDs.** Rule IDs are never reused. `DMARC-008` ("pct below 100") was retired in 1.1.0 because RFC 9989 removed `pct`; such records are now reported by `DMARC-011`.
+
+**DKIM key parsing.** `analyzers/dkim.py` contains a minimal DER reader, so no cryptography dependency is needed. It accepts the SubjectPublicKeyInfo form DKIM records normally use, or a bare PKCS#1 `RSAPublicKey`. It checks the `rsaEncryption` OID, rejects truncated or trailing data, and reports the modulus size in bits. The tests use real keys generated with OpenSSL.
 
 ## Terminal output
 
