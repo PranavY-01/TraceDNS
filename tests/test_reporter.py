@@ -7,8 +7,9 @@ import pytest
 from rich.console import Console
 
 from helpers import healthy_responses, make_resolver, txt
-from tracedns import reporter
+from tracedns import __version__, reporter
 from tracedns.models import (
+    SCHEMA_VERSION,
     DNSResult,
     FindingStatus,
     QueryStatus,
@@ -136,7 +137,7 @@ def test_long_values_truncated_in_table_but_complete_in_json():
 def test_banner_contains_brand_and_hint():
     output = rendered(render_banner)
     assert "DNS INTELLIGENCE" in output and "SECURITY AUDITING" in output
-    assert "v1.0.0" in output
+    assert f"v{__version__}" in output
     assert "tracedns scan <domain>" in output
 
 
@@ -154,8 +155,8 @@ def test_json_serialization_matches_schema():
         "findings",
         "summary",
     ]
-    assert data["schema_version"] == "1.0"
-    assert data["tool"] == {"name": "TraceDNS", "version": "1.0.0"}
+    assert data["schema_version"] == SCHEMA_VERSION == "1.1"
+    assert data["tool"] == {"name": "TraceDNS", "version": __version__}
     assert data["target"] == {"domain": "example.com"}
     scan_meta = data["scan"]
     assert scan_meta["status"] == "completed"
@@ -163,6 +164,7 @@ def test_json_serialization_matches_schema():
     assert scan_meta["checks"] == ["spf", "dmarc", "dkim"]
     assert datetime.fromisoformat(scan_meta["started_at"]).utcoffset().total_seconds() == 0
     assert isinstance(scan_meta["duration_seconds"], float)
+    assert scan_meta["nameservers"] == []
     assert set(data["dns_results"][0]) == {
         "query_name",
         "record_type",
@@ -248,7 +250,7 @@ def test_existing_file_is_not_replaced_without_overwrite(tmp_path):
         write_json_report(scan(), path)
     assert path.read_text(encoding="utf-8") == "keep me"
     write_json_report(scan(), path, overwrite=True)
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == "1.0"
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == SCHEMA_VERSION
 
 
 def test_missing_directory_is_a_clear_error(tmp_path):

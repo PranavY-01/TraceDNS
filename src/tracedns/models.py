@@ -17,7 +17,8 @@ from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Any
 
-SCHEMA_VERSION = "1.0"
+# 1.1 adds scan.nameservers. See schema/report-1.1.json.
+SCHEMA_VERSION = "1.1"
 
 SUPPORTED_RECORD_TYPES: tuple[str, ...] = ("A", "AAAA", "MX", "NS", "TXT")
 SUPPORTED_CHECKS: tuple[str, ...] = ("spf", "dmarc", "dkim")
@@ -127,6 +128,7 @@ class ScanMeta:
     checks: list[str]
     dkim_selector: str | None
     timeout_seconds: float
+    nameservers: list[str]  # empty means the system resolver configuration
 
 
 @dataclass(frozen=True)

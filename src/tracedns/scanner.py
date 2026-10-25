@@ -57,13 +57,17 @@ class _NullObserver:
 
 @dataclass(frozen=True)
 class ScanRequest:
-    """A validated scan request. ``domain`` and ``dkim_selector`` are normalized."""
+    """A validated scan request. ``domain``, ``dkim_selector`` and ``nameservers`` are normalized.
+
+    An empty ``nameservers`` tuple means the system resolver configuration.
+    """
 
     domain: str
     record_types: tuple[str, ...]
     checks: tuple[str, ...]
     dkim_selector: str | None
     timeout: float
+    nameservers: tuple[str, ...] = ()
 
 
 class _QueryCache:
@@ -147,6 +151,7 @@ def run_scan(
             checks=list(request.checks),
             dkim_selector=request.dkim_selector,
             timeout_seconds=request.timeout,
+            nameservers=list(request.nameservers),
         ),
         dns_results=dns_results,
         findings=findings,

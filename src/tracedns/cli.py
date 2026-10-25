@@ -53,6 +53,7 @@ from tracedns.resolver import (
     DNSResolver,
     InvalidNameError,
     normalize_domain,
+    normalize_nameserver,
     normalize_selector,
 )
 from tracedns.scanner import ScanRequest, StageOutcome, run_scan
@@ -82,9 +83,9 @@ app = typer.Typer(
 )
 
 
-def build_resolver(timeout: float) -> DNSResolver:
+def build_resolver(timeout: float, nameservers: tuple[str, ...] = ()) -> DNSResolver:
     """Create the resolver used for scans. Tests replace this to avoid the network."""
-    return DNSResolver(timeout=timeout)
+    return DNSResolver(timeout=timeout, nameservers=nameservers)
 
 
 def _tolerate_unencodable_output() -> None:
@@ -191,6 +192,16 @@ def scan(
             help="Maximum seconds to wait for each DNS query.",
         ),
     ] = DEFAULT_TIMEOUT_SECONDS,
+    nameserver: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--nameserver",
+            "-n",
+            metavar="IP",
+            help="Resolver IP address to query instead of the system resolver. "
+            "Comma-separated or repeated.",
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Show tracebacks for unexpected errors.")
     ] = False,
@@ -199,7 +210,7 @@ def scan(
     err_console = make_console(stderr=True)
     json_stdout = json_path == JSON_STDOUT
     try:
-        request = build_request(domain, record, checks, dkim_selector, timeout)
+        request = build_request(domain, record, checks, dkim_selector, timeout, nameserver)
         report_path = None if json_path in (None, JSON_STDOUT) else Path(json_path)
         if report_path is not None:
             check_output_path(report_path, overwrite)
@@ -236,6 +247,7 @@ def build_request(
     checks: list[str] | None,
     dkim_selector: str | None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    nameservers: list[str] | None = None,
 ) -> ScanRequest:
     """Validate raw CLI values and build a :class:`ScanRequest`.
 
@@ -255,7 +267,15 @@ def build_request(
         selector = normalize_selector(dkim_selector)
         if "dkim" not in selected_checks:
             selected_checks = tuple(c for c in SUPPORTED_CHECKS if c in {*selected_checks, "dkim"})
-    return ScanRequest(normalized_domain, record_types, selected_checks, selector, timeout)
+
+    resolvers: list[str] = []
+    for value in nameservers or []:
+        for item in value.split(","):
+            if item.strip() and (address := normalize_nameserver(item)) not in resolvers:
+                resolvers.append(address)
+    return ScanRequest(
+        normalized_domain, record_types, selected_checks, selector, timeout, tuple(resolvers)
+    )
 
 
 def _split(values: list[str]) -> list[str]:
@@ -306,7 +326,7 @@ def execute_scan(
         observer.stage_finished("Validating target", StageOutcome.OK, request.domain)
 
     try:
-        report = run_scan(request, build_resolver(request.timeout), observer)
+        report = run_scan(request, build_resolver(request.timeout, request.nameservers), observer)
         written = None
         write_error = None
         if report_path is not None:

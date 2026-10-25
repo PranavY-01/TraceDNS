@@ -6,7 +6,8 @@ import pytest
 from typer.testing import CliRunner
 
 from helpers import FakeBackend, healthy_responses, txt
-from tracedns import cli
+from tracedns import __version__, cli
+from tracedns.models import SCHEMA_VERSION
 from tracedns.resolver import DNSResolver
 
 runner = CliRunner()
@@ -17,7 +18,11 @@ def backend(monkeypatch):
     """Route every CLI scan through a fake backend with healthy responses."""
     fake = FakeBackend(healthy_responses())
     monkeypatch.setattr(
-        cli, "build_resolver", lambda timeout: DNSResolver(timeout=timeout, backend=fake)
+        cli,
+        "build_resolver",
+        lambda timeout, nameservers=(): DNSResolver(
+            timeout=timeout, backend=fake, nameservers=nameservers
+        ),
     )
     return fake
 
@@ -47,7 +52,7 @@ def test_scan_help_lists_options():
 def test_version():
     result = invoke("--version")
     assert result.exit_code == 0
-    assert result.stdout.strip() == "TraceDNS 1.0.0"
+    assert result.stdout.strip() == f"TraceDNS {__version__}"
 
 
 def test_valid_scan_without_issues_exits_zero(backend):
@@ -122,7 +127,7 @@ def test_existing_report_requires_overwrite(backend, tmp_path):
     assert backend.calls == []  # rejected before any query
     result = invoke("scan", "example.com", "--json", str(path), "--overwrite")
     assert result.exit_code == 0
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == "1.0"
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == SCHEMA_VERSION
 
 
 def test_json_stdout_mode_contains_only_json(backend):
@@ -132,6 +137,52 @@ def test_json_stdout_mode_contains_only_json(backend):
     assert data["tool"]["name"] == "TraceDNS"
     assert "TRACEDNS" not in result.stdout
     assert "Scan summary" not in result.stdout
+
+
+def test_nameserver_option_is_used_and_reported(backend, monkeypatch):
+    seen = {}
+    original = cli.build_resolver
+
+    def capture(timeout, nameservers=()):
+        seen["nameservers"] = nameservers
+        return original(timeout, nameservers)
+
+    monkeypatch.setattr(cli, "build_resolver", capture)
+    result = invoke(
+        "scan",
+        "example.com",
+        "-c",
+        "none",
+        "-r",
+        "A",
+        "--nameserver",
+        "192.0.2.53,2001:DB8::53",
+        "-n",
+        "192.0.2.53",
+        "--json",
+        "-",
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["nameservers"] == ("192.0.2.53", "2001:db8::53")
+    assert json.loads(result.stdout)["scan"]["nameservers"] == ["192.0.2.53", "2001:db8::53"]
+
+
+def test_nameserver_shown_in_scan_header(backend):
+    result = invoke("scan", "example.com", "-c", "none", "-r", "A", "-n", "192.0.2.53")
+    assert result.exit_code == 0, result.output
+    assert "resolver 192.0.2.53" in result.stdout
+
+
+def test_nameserver_must_be_an_ip_address(backend):
+    result = invoke("scan", "example.com", "--nameserver", "dns.google")
+    assert result.exit_code == cli.ExitCode.INVALID_INPUT
+    assert "not an IP address" in flat(result.stderr)
+    assert backend.calls == []
+
+
+def test_default_scan_uses_system_resolver(backend):
+    result = invoke("scan", "example.com", "-c", "none", "-r", "A", "--json", "-")
+    assert json.loads(result.stdout)["scan"]["nameservers"] == []
 
 
 def test_operational_error_exit_code(backend):

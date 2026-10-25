@@ -232,6 +232,9 @@ def render_scan_header(console: Console, request: ScanRequest) -> None:
         line.append(request.dkim_selector, style="td.text")
     line.append(f"  {glyphs.dot}  timeout ", style="td.muted")
     line.append(f"{request.timeout:g}s", style="td.text")
+    if request.nameservers:
+        line.append(f"  {glyphs.dot}  resolver ", style="td.muted")
+        line.append(", ".join(request.nameservers), style="td.text")
     console.print(line)
     console.print()
 

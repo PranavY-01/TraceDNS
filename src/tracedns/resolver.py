@@ -8,8 +8,9 @@ NXDOMAIN, timeout, SERVFAIL, REFUSED, or another failure) into a
 
 from __future__ import annotations
 
+import ipaddress
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any, Protocol
 
 import dns.exception
@@ -90,6 +91,21 @@ def normalize_selector(raw: str) -> str:
     return value
 
 
+def normalize_nameserver(raw: str) -> str:
+    """Validate a resolver address given with ``--nameserver``.
+
+    Only literal IPv4 or IPv6 addresses are accepted, so choosing a resolver
+    never itself requires a DNS lookup.
+    """
+    value = (raw or "").strip()
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError as exc:
+        raise InvalidNameError(
+            f"'{raw}' is not an IP address. --nameserver takes a resolver IP such as 1.1.1.1."
+        ) from exc
+
+
 def dkim_query_name(selector: str, domain: str) -> str:
     """Build ``<selector>._domainkey.<domain>`` and enforce the name length limit."""
     name = f"{selector}._domainkey.{domain}"
@@ -130,6 +146,8 @@ class ResolverBackend(Protocol):
 class DNSResolver:
     """Run DNS queries with finite timeouts and normalized results.
 
+    ``nameservers`` replaces the system resolver configuration with specific
+    resolver IP addresses (already validated with :func:`normalize_nameserver`).
     ``backend`` can be any object with a dnspython-compatible ``resolve``
     method; tests inject a fake so the suite never touches the network.
     """
@@ -138,18 +156,23 @@ class DNSResolver:
         self,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         backend: ResolverBackend | None = None,
+        nameservers: Sequence[str] = (),
     ) -> None:
         if timeout <= 0:
             raise ValueError("timeout must be positive")
         self.timeout = timeout
+        self.nameservers = tuple(nameservers)
         self._backend = backend
         self._configuration_error: str | None = None
         if backend is None:
             try:
-                resolver = dns.resolver.Resolver()
+                # With explicit nameservers the system configuration is not needed.
+                resolver = dns.resolver.Resolver(configure=not self.nameservers)
             except (dns.resolver.NoResolverConfiguration, OSError) as exc:
                 self._configuration_error = f"No usable resolver configuration: {exc}"
             else:
+                if self.nameservers:
+                    resolver.nameservers = list(self.nameservers)
                 resolver.lifetime = timeout
                 resolver.timeout = min(timeout, MAX_ATTEMPT_TIMEOUT_SECONDS)
                 resolver.cache = None

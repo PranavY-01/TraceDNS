@@ -9,6 +9,7 @@ from tracedns.resolver import (
     InvalidNameError,
     dkim_query_name,
     normalize_domain,
+    normalize_nameserver,
     normalize_selector,
 )
 
@@ -128,6 +129,26 @@ def test_real_resolver_has_finite_timeouts():
     backend = resolver._backend
     assert backend.lifetime == 3.0
     assert backend.timeout <= 2.0
+
+
+def test_explicit_nameservers_replace_system_configuration():
+    resolver = DNSResolver(timeout=3.0, nameservers=["192.0.2.53", "2001:db8::53"])
+    assert [str(ns) for ns in resolver._backend.nameservers] == ["192.0.2.53", "2001:db8::53"]
+    assert resolver._backend.lifetime == 3.0
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("1.1.1.1", "1.1.1.1"), (" 2001:DB8::1 ", "2001:db8::1"), ("::1", "::1")],
+)
+def test_normalize_nameserver_accepts_ip_addresses(raw, expected):
+    assert normalize_nameserver(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", "dns.google", "1.1.1", "1.1.1.1:53", "https://1.1.1.1"])
+def test_normalize_nameserver_rejects_non_ips(raw):
+    with pytest.raises(InvalidNameError):
+        normalize_nameserver(raw)
 
 
 # -------------------------------------------------------------- validation
