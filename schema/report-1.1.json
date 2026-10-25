@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PranavY-01/TraceDNS/blob/main/schema/report-1.1.json",
+  "title": "TraceDNS scan report",
+  "description": "Report written by `tracedns scan --json`. Schema version 1.1 (TraceDNS 1.1.0); 1.1 adds scan.nameservers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tool", "target", "scan", "dns_results", "findings", "summary"],
+  "properties": {
+    "schema_version": { "const": "1.1" },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "TraceDNS" },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain"],
+      "properties": {
+        "domain": { "$ref": "#/$defs/hostname" }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started_at",
+        "finished_at",
+        "duration_seconds",
+        "status",
+        "record_types",
+        "checks",
+        "dkim_selector",
+        "timeout_seconds",
+        "nameservers"
+      ],
+      "properties": {
+        "started_at": { "$ref": "#/$defs/utcTimestamp" },
+        "finished_at": { "$ref": "#/$defs/utcTimestamp" },
+        "duration_seconds": { "type": "number", "minimum": 0 },
+        "status": { "enum": ["completed", "partial", "failed"] },
+        "record_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/recordType" }
+        },
+        "checks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["spf", "dmarc", "dkim"] }
+        },
+        "dkim_selector": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$"
+        },
+        "timeout_seconds": { "type": "number", "minimum": 0.5, "maximum": 60 },
+        "nameservers": {
+          "description": "Resolver IP addresses given with --nameserver; empty means the system resolver.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+          }
+        }
+      }
+    },
+    "dns_results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/dnsResult" }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "hostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[a-z0-9_]([a-z0-9_-]*[a-z0-9])?(\\.[a-z0-9_]([a-z0-9_-]*[a-z0-9])?)+$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "\\+00:00$"
+    },
+    "recordType": { "enum": ["A", "AAAA", "MX", "NS", "TXT"] },
+    "count": { "type": "integer", "minimum": 0 },
+    "dnsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query_name", "record_type", "status", "records", "error"],
+      "properties": {
+        "query_name": { "$ref": "#/$defs/hostname" },
+        "record_type": { "$ref": "#/$defs/recordType" },
+        "status": {
+          "enum": ["success", "not_found", "nxdomain", "timeout", "servfail", "refused", "error"]
+        },
+        "records": { "type": "array", "items": { "type": "string" } },
+        "error": { "type": ["string", "null"] }
+      },
+      "if": { "properties": { "status": { "const": "success" } } },
+      "then": { "properties": { "records": { "minItems": 1 } } },
+      "else": { "properties": { "records": { "maxItems": 0 } } }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "check",
+        "status",
+        "severity",
+        "title",
+        "description",
+        "evidence",
+        "recommendation",
+        "rule_id"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(SPF|DMARC|DKIM)-\\d{3}:.+$" },
+        "category": { "const": "email-authentication" },
+        "check": { "enum": ["spf", "dmarc", "dkim"] },
+        "status": { "enum": ["pass", "finding", "error", "inconclusive", "skipped"] },
+        "severity": { "enum": ["info", "low", "medium", "high", null] },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "recommendation": { "type": "string", "minLength": 1 },
+        "rule_id": { "type": "string", "pattern": "^(SPF|DMARC|DKIM)-\\d{3}$" }
+      },
+      "if": { "properties": { "status": { "const": "finding" } } },
+      "then": { "properties": { "severity": { "enum": ["info", "low", "medium", "high"] } } },
+      "else": { "properties": { "severity": { "const": null } } }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queries_attempted",
+        "queries_completed",
+        "queries_failed",
+        "assessments_total",
+        "passed",
+        "findings_total",
+        "findings_by_severity",
+        "errors",
+        "inconclusive",
+        "skipped"
+      ],
+      "properties": {
+        "queries_attempted": { "$ref": "#/$defs/count" },
+        "queries_completed": { "$ref": "#/$defs/count" },
+        "queries_failed": { "$ref": "#/$defs/count" },
+        "assessments_total": { "$ref": "#/$defs/count" },
+        "passed": { "$ref": "#/$defs/count" },
+        "findings_total": { "$ref": "#/$defs/count" },
+        "findings_by_severity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["high", "medium", "low", "info"],
+          "properties": {
+            "high": { "$ref": "#/$defs/count" },
+            "medium": { "$ref": "#/$defs/count" },
+            "low": { "$ref": "#/$defs/count" },
+            "info": { "$ref": "#/$defs/count" }
+          }
+        },
+        "errors": { "$ref": "#/$defs/count" },
+        "inconclusive": { "$ref": "#/$defs/count" },
+        "skipped": { "$ref": "#/$defs/count" }
+      }
+    }
+  }
+}

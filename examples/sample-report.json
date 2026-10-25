@@ -1,16 +1,16 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "tool": {
     "name": "TraceDNS",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "target": {
     "domain": "example.com"
   },
   "scan": {
-    "started_at": "2026-10-24T13:33:27.417497+00:00",
-    "finished_at": "2026-10-24T13:33:27.418497+00:00",
-    "duration_seconds": 0.0,
+    "started_at": "2026-10-25T06:11:20.944941+00:00",
+    "finished_at": "2026-10-25T06:11:20.946454+00:00",
+    "duration_seconds": 0.001,
     "status": "completed",
     "record_types": [
       "A",
@@ -25,7 +25,8 @@
       "dkim"
     ],
     "dkim_selector": "s1",
-    "timeout_seconds": 5.0
+    "timeout_seconds": 5.0,
+    "nameservers": []
   },
   "dns_results": [
     {
@@ -89,7 +90,7 @@
       "record_type": "TXT",
       "status": "success",
       "records": [
-        "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEF"
+        "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2eQ1RHEuKdQuVJD2YWD0Uepb7XxGWJYHeQyW519Pjz9o8GwHTK4QWElDzpGNgBnwIJrnnRzBBKoHuGb/7yRCoTCcRc32sgzr5LFnFJnFzm5TcLenf2p5+2xA3ieXKOZdS+BogP/dsDgQpE/FlXg9RTU5vEzj8lAZWREpEzsY9+GocQz3i4t+8N46YFaDeiizECk8V0GqoxKfNhs190PaZKVHxPDQL4sWzv7F3btWVYOyZTwYWbD5Ly+FKh8XQeU5G0RP8uMiaHXl7+BcJ6Rox/PJIWkyYcSrPD3RHVSg2bpEUD4hgin3W+CbFh4QZoLWyUV2UGnU1sjD8lFS7t+8tQIDAQAB"
       ],
       "error": null
     }
@@ -130,7 +131,7 @@
       "status": "pass",
       "severity": null,
       "title": "DMARC record passed basic checks",
-      "description": "Exactly one DMARC record was found with a valid version and policy. This is a basic syntax and policy check, not a full DMARC conformance test.",
+      "description": "Exactly one DMARC record was found with a valid version and policy. This is a basic syntax and policy check against RFC 9989, not a full DMARC conformance test.",
       "evidence": [
         "DMARC record: v=DMARC1; p=none"
       ],
@@ -174,7 +175,8 @@
       "title": "DKIM key record found for the selector",
       "description": "A key record with a public key was found. This does not prove that the domain's mail is signed with this selector or that signatures verify.",
       "evidence": [
-        "DKIM record: v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEF"
+        "DKIM record: v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2eQ1RHEuKdQuVJD2YWD0Uepb7XxGWJYHeQyW519Pjz9o8GwHTK4QWElDzpGNgBnwIJrnnRzBBKoHuGb/7yRCoTCcRc32sgzr5LFnFJnFzm5TcLenf2p5+2xA3ieXKOZdS+BogP/dsDgQpE/FlXg9RTU5vEzj8lAZWREpEzsY9+GocQz3i4t+8N46YFaDeiizECk8V0GqoxKfNhs190PaZKVHxPDQL4sWzv7F3btWVYOyZTwYWbD5Ly+FKh8XQeU5G0RP8uMiaHXl7+BcJ6Rox/PJIWkyYcSrPD3RHVSg2bpEUD4hgin3W+CbFh4QZoLWyUV2UGnU1sjD8lFS7t+8tQIDAQAB",
+        "RSA key size: 2048 bits."
       ],
       "recommendation": "No action required.",
       "rule_id": "DKIM-100"
