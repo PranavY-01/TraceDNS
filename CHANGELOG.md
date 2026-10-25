@@ -37,6 +37,7 @@ Addresses the findings of the V1 repository review.
 
 ### Fixed
 - On Windows, the `NUL` device was treated as an interactive terminal, so `tracedns > NUL` (or a CI job with stdin on `NUL`) waited at the menu.
+- The scan summary truncated long report paths with "…"; they now wrap.
 
 ## [1.0.0] — 2026-10-24
 
