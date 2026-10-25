@@ -427,7 +427,8 @@ def build_summary_panel(
     dot = f" {glyphs.dot} "
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="td.muted", no_wrap=True)
-    grid.add_column(style="td.text")
+    # "fold" wraps long values such as a deep report path instead of truncating them.
+    grid.add_column(style="td.text", overflow="fold")
 
     grid.add_row("Target", Text(report.target.domain, style="td.text.b"))
     grid.add_row(

@@ -1,6 +1,7 @@
 import io
 import json
 from datetime import datetime
+from pathlib import Path
 
 import dns.resolver
 import pytest
@@ -21,6 +22,7 @@ from tracedns.reporter import (
     THEME,
     ReportWriteError,
     build_dns_table,
+    build_summary_panel,
     finding_label,
     render_banner,
     render_report,
@@ -96,6 +98,19 @@ def test_empty_result_sets_render():
     output = rendered(render_report, report)
     assert "Security assessment" not in output
     assert "Scan summary" in output
+
+
+def test_long_report_path_is_wrapped_not_truncated():
+    # A CI runner's temp path: longer than the summary panel at 80 columns.
+    deep = Path(
+        r"C:\Users\runneradmin\AppData\Local\Temp\pytest-of-runneradmin"
+        r"\pytest-0\test_json_export0\report.json"
+    )
+    console = plain_console(width=80)
+    console.print(build_summary_panel(console, scan(checks=()), deep))
+    output = console.file.getvalue()
+    assert "…" not in output
+    assert str(deep) in "".join(output.replace("│", "").split())
 
 
 def test_failed_query_shows_error_in_table():

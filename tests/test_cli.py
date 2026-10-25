@@ -36,6 +36,11 @@ def flat(text):
     return " ".join(text.split())
 
 
+def unboxed(text):
+    """Remove panel borders and all whitespace, so values wrapped inside a panel can be matched."""
+    return "".join(text.replace("│", "").replace("|", "").split())
+
+
 def test_help():
     result = invoke("--help")
     assert result.exit_code == 0
@@ -115,7 +120,9 @@ def test_json_export(backend, tmp_path):
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["target"]["domain"] == "example.com"
     assert data["summary"]["queries_attempted"] == len(data["dns_results"])
-    assert "report.json" in result.stdout
+    # The full path is shown (wrapped if needed, never truncated), however deep tmp_path is.
+    assert unboxed(str(path)) in unboxed(result.stdout)
+    assert "…" not in result.stdout
 
 
 def test_existing_report_requires_overwrite(backend, tmp_path):
